@@ -51,6 +51,8 @@ class Announcement:
     target_notice_no: str | None
     title: str
     url: str
+    # 公告正文区的可见文字（不含导航、侧栏、脚本与隐藏元素），供全文检索
+    body_text: str = ""
 
     @property
     def type_label(self) -> str:
@@ -107,6 +109,61 @@ def _text(node, selector: str) -> str | None:
     return el.get_text(strip=True) if el else None
 
 
+# 这些元素只承载脚本 / 样式 / 页面框架（导航、侧栏等），不属于公告正文
+_NON_BODY_TAGS = ("script", "style", "noscript", "template", "nav", "header", "footer", "aside", "form")
+# 显式声明不向用户展示的样式
+_HIDDEN_STYLE = re.compile(r"display\s*:\s*none|visibility\s*:\s*hidden")
+
+
+def _is_hidden(node) -> bool:
+    """判断元素是否对用户不可见（hidden 属性或 display:none / visibility:hidden）。"""
+    if getattr(node, "name", None) is None:
+        return False
+    if node.has_attr("hidden"):
+        return True
+    style = node.get("style")
+    return bool(style and _HIDDEN_STYLE.search(style.replace(" ", "").lower()))
+
+
+def extract_body_text(root) -> str:
+    """提取公告正文区的可见文字。
+
+    范围限定在公告容器内，且：
+    - 优先取专用正文容器 .notice-body（页面框架——导航、侧栏等——本就不在其中）；
+    - 没有专用正文容器时退回到整个公告容器，但剔除导航、侧栏等框架元素；
+    - 剔除 script/style 等非正文标签与带 hidden / display:none / visibility:hidden
+      的隐藏元素；
+    - 输出按块级元素换行并折叠空白，保留段落边界，便于展示命中片段。
+    """
+    scope = root.select_one(".notice-body")
+    if scope is None:
+        scope = root
+
+    chunks: list[str] = []
+    for el in scope.find_all(True):
+        if el.name in _NON_BODY_TAGS or _is_hidden(el):
+            el.extract()
+    for block in scope.find_all(
+        ["p", "div", "li", "tr", "h1", "h2", "h3", "h4", "h5", "h6", "dt", "dd", "br"], recursive=True
+    ):
+        piece = block.get_text(" ", strip=True)
+        if piece:
+            chunks.append(piece)
+    # 容器自身可能直接挂文本（没有块级子元素），用整体文本兜底
+    whole = scope.get_text(" ", strip=True)
+    if not chunks and whole:
+        chunks = [whole]
+
+    seen: set[str] = set()
+    lines: list[str] = []
+    for piece in chunks:
+        piece = re.sub(r"\s+", " ", piece).strip()
+        if piece and piece not in seen:
+            seen.add(piece)
+            lines.append(piece)
+    return "\n".join(lines)
+
+
 def parse_detail(html: str, url: str) -> Announcement:
     """解析单个详情页 HTML（独立出来便于测试）。"""
     soup = BeautifulSoup(html, "html.parser")
@@ -134,6 +191,7 @@ def parse_detail(html: str, url: str) -> Announcement:
         raise ScrapeError(url, "更正/撤销公告缺少所指公告编号")
 
     title_el = root.select_one("h2")
+    body_text = extract_body_text(root)
     return Announcement(
         project_no=project_no,
         notice_no=notice_no,
@@ -143,11 +201,16 @@ def parse_detail(html: str, url: str) -> Announcement:
         target_notice_no=target,
         title=title_el.get_text(strip=True) if title_el else notice_no,
         url=url,
+        body_text=body_text,
     )
 
 
-def scrape(start_url: str) -> ScrapeResult:
-    """从列表网址出发，抓完同源分页与全部详情页。任一页面失败即抛 ScrapeError。"""
+def scrape(start_url: str, client: httpx.Client | None = None) -> ScrapeResult:
+    """从列表网址出发，抓完同源分页与全部详情页。任一页面失败即抛 ScrapeError。
+
+    client 可由调用方注入（例如测试中指向 ASGI 应用的内存客户端）；
+    不传则自建带超时与重试设置的 httpx.Client。
+    """
     parsed = urlparse(start_url)
     if parsed.scheme not in ("http", "https") or not parsed.hostname:
         raise ScrapeError(start_url, "起始网址必须是 http(s) 网址")
@@ -158,11 +221,7 @@ def scrape(start_url: str) -> ScrapeResult:
     detail_urls: list[str] = []
     seen_details: set[str] = set()
 
-    with httpx.Client(
-        timeout=httpx.Timeout(10.0),
-        follow_redirects=True,
-        headers={"User-Agent": USER_AGENT},
-    ) as client:
+    def _run(c: httpx.Client) -> None:
         # 1) 遍历同源分页，收集详情页链接
         while queue:
             url = queue.pop(0)
@@ -170,7 +229,7 @@ def scrape(start_url: str) -> ScrapeResult:
                 continue
             if len(visited_lists) >= MAX_LIST_PAGES:
                 raise ScrapeError(url, f"分页数量超过上限 {MAX_LIST_PAGES}")
-            soup = _fetch_soup(client, url)
+            soup = _fetch_soup(c, url)
 
             items = soup.select("ul.notice-list a[href]")
             nav_links = soup.select("nav.pagination a[href]")
@@ -192,12 +251,22 @@ def scrape(start_url: str) -> ScrapeResult:
                 if same_origin(href, start_url) and href not in visited_lists and href not in queue:
                     queue.append(href)
 
-        # 2) 逐个抓取详情页
+        # 2) 逐个抓取详情页（正文可见文字在 parse_detail 内一并提取）
         for durl in detail_urls:
             if len(result.announcements) >= MAX_DETAIL_PAGES:
                 raise ScrapeError(durl, f"详情页数量超过上限 {MAX_DETAIL_PAGES}")
-            soup = _fetch_soup(client, durl)
+            soup = _fetch_soup(c, durl)
             result.announcements.append(parse_detail(str(soup), durl))
             result.detail_pages.append(durl)
+
+    if client is not None:
+        _run(client)
+    else:
+        with httpx.Client(
+            timeout=httpx.Timeout(10.0),
+            follow_redirects=True,
+            headers={"User-Agent": USER_AGENT},
+        ) as owned:
+            _run(owned)
 
     return result

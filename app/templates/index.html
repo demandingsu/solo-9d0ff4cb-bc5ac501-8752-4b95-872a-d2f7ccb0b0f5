@@ -37,6 +37,14 @@
     .round-status.running { color: #b8860b; }
     .empty { color: var(--gray); background: #fff; border: 1px dashed #c8d0d8; border-radius: 6px; padding: 1.5em; text-align: center; }
     code { background: #eef1f4; padding: .1em .35em; border-radius: 4px; }
+    form.search { display: flex; gap: .6em; margin: 1.2em 0; flex-wrap: wrap; }
+    form.search input[type=search] { flex: 1 1 28em; padding: .55em .7em; border: 1px solid #c8d0d8; border-radius: 5px; font-size: 1em; }
+    form.search button { padding: .55em 1.6em; background: var(--green); color: #fff; border: 0; border-radius: 5px; font-size: 1em; cursor: pointer; }
+    form.search button:hover { background: #176328; }
+    .search-hint { color: var(--gray); font-size: .9em; margin: .2em 0 .8em; }
+    mark { background: #fff1a8; padding: 0 .15em; border-radius: 2px; }
+    .snippet { margin: .35em 0; line-height: 1.7; }
+    .hit-title a { color: var(--blue); }
   </style>
 </head>
 <body>
@@ -89,6 +97,44 @@
   </table>
   {% else %}
   <div class="empty">尚无成功采集结果。请在上方输入列表网址并点击“开始抓取”。</div>
+  {% endif %}
+
+  <h2>公告正文检索</h2>
+  <form class="search" method="get" action="/search" role="search">
+    <input type="search" name="q" value="{{ q }}" placeholder="输入连续至少三个汉字的短语，如：联合体投标" required>
+    <button type="submit">检索正文</button>
+  </form>
+  <p class="search-hint">仅检索公告正文区的可见文字（导航、侧栏不参与）；只接受连续至少三个汉字的短语，多个短语需同时命中。结果仅来自最近一次成功采集（第 {{ latest_ok['id'] if latest_ok else '—' }} 轮）。</p>
+
+  {% if search_error %}
+  <div class="banner err">{{ search_error }}</div>
+  {% elif search_hits is not none %}
+    {% if search_phrases %}
+    <p class="muted">检索短语：{% for p in search_phrases %}<code>{{ p }}</code>{% if not loop.last %} 且 {% endif %}{% endfor %} · 命中 {{ search_hits|length }} 条公告（来源：第 {{ latest_ok['id'] }} 轮采集）。</p>
+    {% endif %}
+    {% if search_hits %}
+    <table>
+      <thead>
+        <tr><th>项目编号</th><th>公告编号</th><th>命中原文片段</th><th>来源链接</th></tr>
+      </thead>
+      <tbody>
+        {% for h in search_hits %}
+        <tr>
+          <td><strong>{{ h.project_no }}</strong></td>
+          <td>{{ h.notice_no }}<br><span class="muted">{{ h.title }}</span></td>
+          <td>
+            {% for s in h.snippets %}
+            <div class="snippet">{{ s|safe }}</div>
+            {% endfor %}
+          </td>
+          <td><a class="hit-title" href="{{ h.url|public_url }}" target="_blank" rel="noopener">查看原文</a></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <div class="empty">最近一次成功采集的公告正文中没有命中“{{ q }}”的内容。</div>
+    {% endif %}
   {% endif %}
 
   <h2>采集轮次</h2>

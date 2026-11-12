@@ -10,21 +10,51 @@
     dl.notice-fields dt { font-weight: bold; color: #555; }
     dl.notice-fields dd { margin: 0; }
     .notice-body { margin: 1.5em 0; line-height: 1.8; }
+    .notice-body p { margin: .6em 0; }
+    .layout { display: flex; gap: 1.5em; }
+    .layout main { flex: 1; min-width: 0; }
+    aside.site-sidebar { width: 13em; flex: 0 0 13em; background: #f0f4f8; padding: 1em; border-radius: 6px; font-size: .92em; }
+    aside.site-sidebar a { display: block; margin: .4em 0; color: #2c5f8a; }
+    nav.site-nav { background: #2c5f8a; padding: .6em 1em; border-radius: 6px; margin-bottom: 1.2em; }
+    nav.site-nav a { color: #fff; margin-right: 1.2em; text-decoration: none; }
   </style>
 </head>
 <body>
-  <div class="notice" data-notice-type="{{ a.type }}">
-    <h1>{{ a.type_label }}</h1>
-    <h2>{{ a.title }}</h2>
-    <dl class="notice-fields">
-      <dt>项目编号</dt><dd id="project-no">{{ a.project_no }}</dd>
-      <dt>公告编号</dt><dd id="notice-no">{{ a.notice_no }}</dd>
-      <dt>发布时间</dt><dd id="publish-time">{{ a.publish_time }}</dd>
-      {% if a.deadline %}<dt>截标时间</dt><dd id="deadline">{{ a.deadline }}</dd>{% endif %}
-      {% if a.target %}<dt>所指公告</dt><dd id="target-notice"><a href="/detail/{{ a.target }}.html">{{ a.target }}</a></dd>{% endif %}
-    </dl>
-    <div class="notice-body">{{ a.body }}</div>
-    <p><a href="/list.html?page=1">返回列表</a></p>
+  <nav class="site-nav">
+    <a href="/list.html?page=1">公告首页</a>
+    <a href="/list.html?page=2">往期公告</a>
+    <a href="/admin/fail?on=0">故障注入管理</a>
+  </nav>
+  <div class="layout">
+    <main>
+      <div class="notice" data-notice-type="{{ a.type }}">
+        <h1>{{ a.type_label }}</h1>
+        <h2>{{ a.title }}</h2>
+        <dl class="notice-fields">
+          <dt>项目编号</dt><dd id="project-no">{{ a.project_no }}</dd>
+          <dt>公告编号</dt><dd id="notice-no">{{ a.notice_no }}</dd>
+          <dt>发布时间</dt><dd id="publish-time">{{ a.publish_time }}</dd>
+          {% if a.deadline %}<dt>截标时间</dt><dd id="deadline">{{ a.deadline }}</dd>{% endif %}
+          {% if a.target %}<dt>所指公告</dt><dd id="target-notice"><a href="/detail/{{ a.target }}.html">{{ a.target }}</a></dd>{% endif %}
+        </dl>
+        <div class="notice-body">
+          {% for para in a.body.split("\n\n") %}
+          <p>{{ para }}</p>
+          {% endfor %}
+          <!-- 隐藏元素：对用户不可见，采集端不得纳入正文检索 -->
+          <p hidden>隐藏提示：本页含联合体投标条款的隐藏占位文字，检索不应命中此句。</p>
+          <p style="display:none">样式隐藏占位：联合体投标隐藏样式文字同样不应被检索。</p>
+          <script>var decoy = "脚本中的联合体投标文字不应被采集与检索";</script>
+        </div>
+        <p><a href="/list.html?page=1">返回列表</a></p>
+      </div>
+    </main>
+    <aside class="site-sidebar">
+      <strong>办事侧栏</strong>
+      <a href="/list.html?page=1">联合体投标操作指南（侧栏链接）</a>
+      <a href="/list.html?page=1">联合体投标常见问题（侧栏链接）</a>
+      <a href="/list.html?page=1">下载中心</a>
+    </aside>
   </div>
 </body>
 </html>

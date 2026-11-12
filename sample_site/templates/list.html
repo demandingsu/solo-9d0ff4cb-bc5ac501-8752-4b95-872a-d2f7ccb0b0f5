@@ -36,7 +36,8 @@
   <footer>
     示例公告站 · 故障注入（{{ fail_notice }} 返回 500）：
     <a href="/admin/fail?on=1">开启</a> / <a href="/admin/fail?on=0">关闭</a>
-    （当前：{{ "开" if fail_on else "关" }}）
+    （当前：{{ "开" if fail_on else "关" }}）<br>
+    已撤下公告：{{ removed|join("、") if removed else "无" }}
   </footer>
 </body>
 </html>

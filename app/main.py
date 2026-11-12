@@ -15,6 +15,7 @@ from fastapi.templating import Jinja2Templates
 import analysis
 import db
 import scraper
+import search
 
 DEFAULT_START_URL = os.environ.get("DEFAULT_START_URL", "http://sample-site:8000/list.html?page=1")
 # 展示层网址改写：容器内部地址 → 浏览器可访问地址（可选）
@@ -29,7 +30,9 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="截标时间核对工具", lifespan=lifespan)
-templates = Jinja2Templates(directory="templates")
+# 模板目录取本文件所在路径，避免进程工作目录不同时找不到模板
+_TEMPLATE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "templates")
+templates = Jinja2Templates(directory=_TEMPLATE_DIR)
 
 
 def public_url(url: str) -> str:
@@ -60,6 +63,51 @@ def index(request: Request, msg: str = ""):
             "latest_ok": latest_ok,
             "projects": projects,
             "rounds": rounds,
+            # 检索区块的初始状态
+            "q": "",
+            "search_hits": None,
+            "search_phrases": None,
+            "search_error": "",
+        },
+    )
+
+
+@app.get("/search", response_class=HTMLResponse)
+def do_search(request: Request, q: str = ""):
+    """在最近一次成功采集轮次内检索公告正文。"""
+    rounds = db.get_rounds()
+    latest_ok = db.get_latest_success_round()
+    projects = analysis.build_projects(db.get_announcements(latest_ok["id"])) if latest_ok is not None else None
+    last_round = rounds[0] if rounds else None
+
+    hits = None
+    phrases = None
+    error = ""
+    query = q.strip()
+    if latest_ok is None:
+        error = "尚无成功采集结果，请先完成一次抓取后再检索。"
+    elif not query:
+        error = "请输入要检索的短语。"
+    else:
+        try:
+            hits, phrases = search.search(latest_ok["id"], query)
+        except search.QueryError as exc:
+            error = str(exc)
+
+    return templates.TemplateResponse(
+        request,
+        "index.html",
+        {
+            "default_start_url": DEFAULT_START_URL,
+            "msg": "",
+            "last_round": last_round,
+            "latest_ok": latest_ok,
+            "projects": projects,
+            "rounds": rounds,
+            "q": query,
+            "search_hits": hits,
+            "search_phrases": phrases,
+            "search_error": error,
         },
     )
 
